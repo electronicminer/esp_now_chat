@@ -1,0 +1,276 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <esp_now.h>
+
+#define CHANNEL 1
+
+// Define the message structure. Adjust size as needed.
+typedef struct struct_message {
+    char data[250];
+} struct_message;
+
+struct_message incomingMessage;
+struct_message myData;
+
+// Specify target peer MAC address (replace with your peer's actual MAC address)
+// uint8_t peerAddress[] = {0xCC,0xBA,0x97,0x0F,0x24,0x78};//my esp32
+uint8_t peerAddress[] = {0xCC,0xBA,0x97,0x0F,0x2C,0x74};//zs's esp32
+// Callback for when data is sent
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    Serial.print("Send status: ");
+    Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Success" : "Failure");
+    Serial.println("\n");
+}
+
+// Callback for when data is received
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int len) {
+    Serial.print("From ");
+    char macStr[18];
+    snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+    Serial.print(macStr);
+    Serial.println(" received:");
+    
+    // Copy received data into the incomingMessage structure
+    memcpy(&incomingMessage, data, sizeof(incomingMessage));
+    Serial.println(incomingMessage.data);
+    Serial.println("\n");
+}
+
+void setup() {
+    Serial.begin(115200);
+    // Set device to Wi-Fi STA mode
+    WiFi.mode(WIFI_STA);
+    
+    
+    //显示本机mac地址
+    Serial.print("MAC Address: ");
+    Serial.println(WiFi.macAddress());
+    // Initialize ESP-NOW
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("ESP-NOW initialization failed");
+        return;
+    }
+    // Register send and receive callback functions
+    esp_now_register_send_cb(OnDataSent);
+    esp_now_register_recv_cb(OnDataRecv);
+    
+    // Setup peer for point-to-point communication
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, peerAddress, sizeof(peerAddress));
+    peerInfo.channel = CHANNEL;
+    peerInfo.encrypt = false;
+    
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+        Serial.println("Adding peer failed");
+        return;
+    }
+    
+    Serial.println("ESP-NOW point-to-point initialization completed");
+}
+
+void loop() {
+    // Check if any serial input is available
+    if (Serial.available() > 0) {
+        String input = Serial.readStringUntil('\n');
+        input.trim();
+        if (input.length() > 0) {
+            // Convert the input string to a char array and store it in myData
+            input.toCharArray(myData.data, sizeof(myData.data));
+            
+            // Send a message to the specified peer
+            esp_err_t result = esp_now_send(peerAddress, (uint8_t *)&myData, sizeof(myData));
+            if (result == ESP_OK) {
+                Serial.println("Message sent successfully");
+            } else {
+                Serial.println("Message sending failed");
+            }
+        }
+    }
+    delay(100);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+v2.0
+#include <Arduino.h>
+#include <WiFi.h>
+#include <esp_now.h>
+#include <ESPAsyncWebServer.h>
+
+#define CHANNEL 1
+
+// Web服务器
+AsyncWebServer server(80);
+
+// 消息存储
+String chatMessages = "";
+
+// 目标设备MAC地址（请替换为实际对端设备的MAC地址）
+uint8_t peerAddress[] = {0xCC,0xBA,0x97,0x0F,0x24,0x78};//my esp32
+// uint8_t peerAddress[] = {0xCC,0xBA,0x97,0x0F,0x2C,0x74};//zs's esp32
+// 消息结构
+typedef struct struct_message {
+    char data[250];
+} struct_message;
+
+struct_message myData;
+
+// HTML页面
+const char index_html[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESP-NOW Chat</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {font-family: Arial; margin: 0; padding: 20px;}
+        .container {max-width: 600px; margin: auto;}
+        #chat {
+            height: 300px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            background: #f9f9f9;
+        }
+        .message {margin: 5px 0; padding: 8px; background: #fff; border-radius: 5px;}
+        .input-group {display: flex;}
+        input {flex: 1; padding: 10px; margin-right: 5px;}
+        button {padding: 10px 20px; background: #007bff; color: white; border: none;}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="chat"></div>
+        <div class="input-group">
+            <input type="text" id="message" placeholder="text...">
+            <button onclick="sendMessage()">send</button>
+        </div>
+    </div>
+    <script>
+        // 定时刷新聊天内容
+        function refreshChat() {
+            fetch('/getMessages')
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('chat').innerHTML = data;
+                    const chat = document.getElementById('chat');
+                    chat.scrollTop = chat.scrollHeight;
+                });
+        }
+        
+        // 发送消息
+        function sendMessage() {
+            const input = document.getElementById('message');
+            if (input.value.trim()) {
+                fetch('/send?msg=' + encodeURIComponent(input.value));
+                input.value = '';
+                refreshChat();
+            }
+        }
+        
+        // 每秒刷新一次
+        setInterval(refreshChat, 1000);
+        
+        // 支持回车键发送
+        document.getElementById('message').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>
+)rawliteral";
+
+// ESP-NOW发送回调
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    Serial.printf("发送状态: %s\n", status == ESP_NOW_SEND_SUCCESS ? "成功" : "失败");
+}
+
+// ESP-NOW接收回调
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int len) {
+    char incomingMessage[256];
+    memcpy(incomingMessage, data, len);
+    incomingMessage[len] = '\0'; // 确保字符串正确结束
+
+    // 添加接收的消息到聊天记录
+    chatMessages += "<div class='message'>接收: " + String(incomingMessage) + "</div>";
+}
+
+void setup() {
+    Serial.begin(115200);
+
+    // 创建WiFi热点
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP("ESP32-Chat_zs", "12345678");
+    // WiFi.softAP("ESP32-Chat_wp", "12345678");
+    Serial.print("AP IP: ");
+    Serial.println(WiFi.softAPIP());
+
+    // 初始化ESP-NOW
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("ESP-NOW初始化失败");
+        return;
+    }
+
+    // 注册ESP-NOW回调
+    esp_now_register_send_cb(OnDataSent);
+    esp_now_register_recv_cb(OnDataRecv);
+
+    // 添加对端设备
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, peerAddress, 6);
+    peerInfo.channel = CHANNEL;
+    peerInfo.encrypt = false;
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+        Serial.println("添加对端失败");
+        return;
+    }
+
+    // 设置Web服务器路由
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+        request->send_P(200, "text/html", index_html);
+    });
+
+    server.on("/getMessages", HTTP_GET, [](AsyncWebServerRequest *request){
+        request->send(200, "text/html", chatMessages);
+    });
+
+    server.on("/send", HTTP_GET, [](AsyncWebServerRequest *request){
+        if (request->hasParam("msg")) {
+            String msg = request->getParam("msg")->value();
+            chatMessages += "<div class='message'>发送: " + msg + "</div>";
+
+            // 通过ESP-NOW发送消息
+            strncpy(myData.data, msg.c_str(), sizeof(myData.data));
+            esp_now_send(peerAddress, (uint8_t *)&myData, sizeof(myData));
+        }
+        request->send(200, "text/plain", "OK");
+    });
+
+    // 启动服务器
+    server.begin();
+    Serial.println("系统初始化完成");
+}
+
+void loop() {
+    // 空循环，服务器自动处理请求
+}

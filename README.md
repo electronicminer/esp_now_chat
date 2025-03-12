@@ -75,7 +75,7 @@ sequenceDiagram
     participant Server as ESP32 Web服务器
     participant Peer as 对端ESP32
     
-    Web->>Server: WS连接(ws://192.168.4.1:81)
+    Web->>Server: WS连接(ws://192.168.4.1)
     loop 消息循环
         Web->>Server: 发送消息
         Server->>Peer: ESP-NOW传输
